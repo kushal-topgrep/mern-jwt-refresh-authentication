@@ -1,16 +1,15 @@
 import LoadingScreen from "@components/LoadingScreen";
 import { createContext, useEffect, useReducer, useRef } from "react";
 import { axiosPrivate } from "../utils/axios";
-import jwtDecoder from "jwt-decode";
-import { catchError } from "../utils/catchError";
 import {
   hasQuant0Session,
   getFreshQuant0Token,
   quant0SignOut,
   clearQuant0Token,
+  redirectToQuant0Login,
 } from "../utils/quant0";
 
-//initial State value
+// initial State
 const initialState = {
   isInitialized: false,
   isAuthenticated: false,
@@ -70,26 +69,12 @@ const reducer = (state, action) => {
   }
 };
 
-// decode jwt
-const decodeJwt = (token) => {
-  try {
-    const { userName, role, userId, sub, name, email } = jwtDecoder(token);
-    return {
-      userName: userName || name || email?.split("@")[0] || sub,
-      role: role || "user",
-      userId: userId || sub,
-    };
-  } catch {
-    return { userName: "User", role: "user", userId: "quant0" };
-  }
-};
-
 // auth provider
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(reducer, initialState);
   const isMountedRef = useRef(false);
 
-  // set session directly (e.g. from Quant0 Callback)
+  // set session directly (called from Quant0 Callback)
   const setQuant0Session = (accessToken, verifiedUser) => {
     const user = {
       userName: verifiedUser.userName || verifiedUser.name || "User",
@@ -104,45 +89,20 @@ export const AuthProvider = ({ children }) => {
     });
   };
 
-  // login
-  const login = async (userName, password) => {
-    const response = await axiosPrivate.post("/api/auth/login", {
-      userName,
-      password,
-    });
-
-    const { accessToken } = response.data;
-    const user = decodeJwt(accessToken);
-
-    dispatch({ type: ActionTypes.LOGIN, payload: { accessToken, user } });
+  // login redirects to Quant0 portal
+  const login = () => {
+    redirectToQuant0Login();
   };
 
-  // change password
-  const changePassword = async (oldPassword, newPassword) => {
-    await axiosPrivate.post("/api/auth/change-password", {
-      oldPassword,
-      newPassword,
-    });
-  };
-
-  // logout
+  // logout terminates session and redirects via Quant0
   const logout = async () => {
-    try {
-      await axiosPrivate.get("/api/auth/logout");
-    } catch (error) {
-      console.log(error);
-    } finally {
-      clearQuant0Token();
-      dispatch({ type: ActionTypes.LOGOUT });
-      if (hasQuant0Session()) {
-        quant0SignOut();
-      }
-    }
+    clearQuant0Token();
+    dispatch({ type: ActionTypes.LOGOUT });
+    quant0SignOut();
   };
 
-  // refresh token
+  // refresh token via Quant0 OAuth 2.1 token endpoint
   const refresh = async () => {
-    // 1. If user has Quant0 session stored in localStorage, refresh with Quant0
     if (hasQuant0Session()) {
       try {
         const freshQuant0Token = await getFreshQuant0Token();
@@ -178,35 +138,16 @@ export const AuthProvider = ({ children }) => {
       }
     }
 
-    // 2. Otherwise try local refresh cookie
-    try {
-      const response = await axiosPrivate.get("/api/auth/refresh");
-      const { accessToken } = response.data;
-      const user = decodeJwt(accessToken);
+    dispatch({
+      type: ActionTypes.REFRESH,
+      payload: { accessToken: "", user: null, isAuthenticated: false },
+    });
 
-      dispatch({
-        type: ActionTypes.REFRESH,
-        payload: {
-          accessToken,
-          user,
-          isAuthenticated: accessToken ? true : false,
-        },
-      });
-
-      return { accessToken, user };
-    } catch (error) {
-      dispatch({
-        type: ActionTypes.REFRESH,
-        payload: { accessToken: "", user: null, isAuthenticated: false },
-      });
-
-      throw new Error(catchError(error));
-    }
+    return { accessToken: "", user: null };
   };
 
-  // init app
+  // init app on boot
   const initializingApp = async () => {
-    // Check Quant0 first if token is cached
     if (hasQuant0Session()) {
       try {
         const freshToken = await getFreshQuant0Token();
@@ -237,37 +178,23 @@ export const AuthProvider = ({ children }) => {
           return;
         }
       } catch (e) {
-        console.warn("Quant0 auto-init failed, falling back to local:", e);
+        console.warn("Quant0 session initialization failed:", e);
+        clearQuant0Token();
       }
     }
 
-    try {
-      const { accessToken, user } = await refresh();
-
-      dispatch({
-        type: ActionTypes.INIT,
-        payload: {
-          accessToken,
-          user,
-          isAuthenticated: accessToken ? true : false,
-        },
-      });
-    } catch (error) {
-      dispatch({
-        type: ActionTypes.INIT,
-        payload: { accessToken: "", user: null, isAuthenticated: false },
-      });
-    }
+    dispatch({
+      type: ActionTypes.INIT,
+      payload: { accessToken: "", user: null, isAuthenticated: false },
+    });
   };
 
   useEffect(() => {
     if (isMountedRef.current) return;
     initializingApp();
-
     isMountedRef.current = true;
   }, []);
 
-  // show loading if not init
   if (!state.isInitialized) {
     return <LoadingScreen />;
   }
@@ -279,7 +206,6 @@ export const AuthProvider = ({ children }) => {
         login,
         logout,
         refresh,
-        changePassword,
         setQuant0Session,
       }}
     >

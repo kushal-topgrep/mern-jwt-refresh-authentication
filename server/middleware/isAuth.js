@@ -1,56 +1,46 @@
-const jwt = require("jsonwebtoken");
-const { jwtSecret } = require("../config");
 const { verifyToken } = require("../helpers/quant0");
 const Auth = require("../models/Auth");
 
+/**
+ * Protect middleware: Exclusively verifies Quant0 Bearer tokens.
+ * Legacy JWT cookies and local password session verification have been removed.
+ */
 const isAuth = (role) => async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.authorization || req.headers.Authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized!" });
+      return res.status(401).json({ message: "Not authorized: Missing Quant0 Bearer token" });
     }
 
     const token = authHeader.split(" ")[1];
-
-    let userObj = null;
-
-    // 1. Try local JWT verify first
+    let claims;
     try {
-      const decoded = jwt.verify(token, jwtSecret.access);
-      userObj = decoded;
-    } catch (localJwtErr) {
-      // 2. Fall back to Quant0 token verification
-      try {
-        const claims = await verifyToken(token);
-        const sub = claims.subject || claims.sub;
-        const dbUser = await Auth.findOne({ quant0Sub: sub });
+      claims = await verifyToken(token);
+    } catch (err) {
+      return res.status(401).json({ message: `Not authorized: ${err.message}` });
+    }
 
-        if (dbUser) {
-          userObj = {
-            userId: dbUser._id.toString(),
-            userName: dbUser.userName,
-            role: dbUser.role || "user",
-          };
-          req.quant0User = dbUser;
-          req.quant0Claims = claims;
-        } else {
-          userObj = {
-            userId: sub,
-            userName: claims.name || claims.email?.split("@")[0] || sub,
-            role: "user",
-          };
+    const sub = claims.subject || claims.sub;
+    const dbUser = await Auth.findOne({ quant0Sub: sub });
+
+    const userObj = dbUser
+      ? {
+          userId: dbUser._id.toString(),
+          userName: dbUser.userName,
+          role: dbUser.role || "user",
+          email: dbUser.email,
         }
-      } catch (quant0Err) {
-        return res.status(403).json({ message: "Invalid token!" });
-      }
-    }
-
-    if (!userObj) {
-      return res.status(403).json({ message: "Invalid token!" });
-    }
+      : {
+          userId: sub,
+          userName: claims.name || claims.email?.split("@")[0] || sub,
+          role: "user",
+          email: claims.email,
+        };
 
     req.user = userObj;
+    req.token = token;
+    req.claims = claims;
 
     if (role === "allowAll") return next();
 
@@ -68,4 +58,3 @@ const isAuth = (role) => async (req, res, next) => {
 };
 
 module.exports = isAuth;
-
