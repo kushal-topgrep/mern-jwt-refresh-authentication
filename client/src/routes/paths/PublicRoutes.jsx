@@ -2,6 +2,7 @@ import BaseLayout from "@components/layouts/base";
 import PublicGuard from "@routes/PublicGuard";
 import Login from "@pages/auth/Login";
 import Signup from "@pages/auth/Signup";
+import Callback from "@pages/auth/Callback";
 
 const PublicRoutes = {
   element: (
@@ -26,7 +27,12 @@ const PublicRoutes = {
         </PublicGuard>
       ),
     },
+    {
+      path: "callback",
+      element: <Callback />,
+    },
   ],
 };
 
 export default PublicRoutes;
+

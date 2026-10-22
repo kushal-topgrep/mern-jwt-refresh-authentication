@@ -17,4 +17,7 @@ router.get("/refresh", authController.refresh);
 // api/auth/logout
 router.get("/logout", authController.logout);
 
+// api/auth/quant0-session
+router.post("/quant0-session", authController.quant0Session);
+
 module.exports = router;

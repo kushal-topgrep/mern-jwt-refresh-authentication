@@ -3,6 +3,12 @@ import { createContext, useEffect, useReducer, useRef } from "react";
 import { axiosPrivate } from "../utils/axios";
 import jwtDecoder from "jwt-decode";
 import { catchError } from "../utils/catchError";
+import {
+  hasQuant0Session,
+  getFreshQuant0Token,
+  quant0SignOut,
+  clearQuant0Token,
+} from "../utils/quant0";
 
 //initial State value
 const initialState = {
@@ -66,15 +72,37 @@ const reducer = (state, action) => {
 
 // decode jwt
 const decodeJwt = (token) => {
-  const { userName, role, userId } = jwtDecoder(token);
-
-  return { userName, role, userId };
+  try {
+    const { userName, role, userId, sub, name, email } = jwtDecoder(token);
+    return {
+      userName: userName || name || email?.split("@")[0] || sub,
+      role: role || "user",
+      userId: userId || sub,
+    };
+  } catch {
+    return { userName: "User", role: "user", userId: "quant0" };
+  }
 };
 
 // auth provider
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(reducer, initialState);
   const isMountedRef = useRef(false);
+
+  // set session directly (e.g. from Quant0 Callback)
+  const setQuant0Session = (accessToken, verifiedUser) => {
+    const user = {
+      userName: verifiedUser.userName || verifiedUser.name || "User",
+      role: verifiedUser.role || "user",
+      userId: verifiedUser._id || verifiedUser.id,
+      email: verifiedUser.email,
+    };
+
+    dispatch({
+      type: ActionTypes.LOGIN,
+      payload: { accessToken, user },
+    });
+  };
 
   // login
   const login = async (userName, password) => {
@@ -104,14 +132,53 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.log(error);
     } finally {
+      clearQuant0Token();
       dispatch({ type: ActionTypes.LOGOUT });
+      if (hasQuant0Session()) {
+        quant0SignOut();
+      }
     }
   };
 
   // refresh token
   const refresh = async () => {
-    console.log("refreshing ...");
+    // 1. If user has Quant0 session stored in localStorage, refresh with Quant0
+    if (hasQuant0Session()) {
+      try {
+        const freshQuant0Token = await getFreshQuant0Token();
+        if (freshQuant0Token) {
+          const res = await axiosPrivate.post(
+            "/api/auth/quant0-session",
+            {},
+            {
+              headers: { Authorization: `Bearer ${freshQuant0Token}` },
+            }
+          );
+          const verifiedUser = res.data;
+          const user = {
+            userName: verifiedUser.userName || verifiedUser.name || "User",
+            role: verifiedUser.role || "user",
+            userId: verifiedUser._id || verifiedUser.id,
+            email: verifiedUser.email,
+          };
 
+          dispatch({
+            type: ActionTypes.REFRESH,
+            payload: {
+              accessToken: freshQuant0Token,
+              user,
+              isAuthenticated: true,
+            },
+          });
+
+          return { accessToken: freshQuant0Token, user };
+        }
+      } catch (err) {
+        console.warn("Quant0 token refresh failed:", err);
+      }
+    }
+
+    // 2. Otherwise try local refresh cookie
     try {
       const response = await axiosPrivate.get("/api/auth/refresh");
       const { accessToken } = response.data;
@@ -139,7 +206,40 @@ export const AuthProvider = ({ children }) => {
 
   // init app
   const initializingApp = async () => {
-    console.log("initializing ...");
+    // Check Quant0 first if token is cached
+    if (hasQuant0Session()) {
+      try {
+        const freshToken = await getFreshQuant0Token();
+        if (freshToken) {
+          const res = await axiosPrivate.post(
+            "/api/auth/quant0-session",
+            {},
+            {
+              headers: { Authorization: `Bearer ${freshToken}` },
+            }
+          );
+          const verifiedUser = res.data;
+          const user = {
+            userName: verifiedUser.userName || verifiedUser.name || "User",
+            role: verifiedUser.role || "user",
+            userId: verifiedUser._id || verifiedUser.id,
+            email: verifiedUser.email,
+          };
+
+          dispatch({
+            type: ActionTypes.INIT,
+            payload: {
+              accessToken: freshToken,
+              user,
+              isAuthenticated: true,
+            },
+          });
+          return;
+        }
+      } catch (e) {
+        console.warn("Quant0 auto-init failed, falling back to local:", e);
+      }
+    }
 
     try {
       const { accessToken, user } = await refresh();
@@ -180,6 +280,7 @@ export const AuthProvider = ({ children }) => {
         logout,
         refresh,
         changePassword,
+        setQuant0Session,
       }}
     >
       {children}

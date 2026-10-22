@@ -1,7 +1,9 @@
 const jwt = require("jsonwebtoken");
 const { jwtSecret } = require("../config");
+const { verifyToken } = require("../helpers/quant0");
+const Auth = require("../models/Auth");
 
-const isAuth = (role) => (req, res, next) => {
+const isAuth = (role) => async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -10,15 +12,50 @@ const isAuth = (role) => (req, res, next) => {
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, jwtSecret.access);
 
-    req.user = decoded;
+    let userObj = null;
 
-    if (role === "allowAll") next();
+    // 1. Try local JWT verify first
+    try {
+      const decoded = jwt.verify(token, jwtSecret.access);
+      userObj = decoded;
+    } catch (localJwtErr) {
+      // 2. Fall back to Quant0 token verification
+      try {
+        const claims = await verifyToken(token);
+        const sub = claims.subject || claims.sub;
+        const dbUser = await Auth.findOne({ quant0Sub: sub });
 
-    if (role !== decoded.role) {
+        if (dbUser) {
+          userObj = {
+            userId: dbUser._id.toString(),
+            userName: dbUser.userName,
+            role: dbUser.role || "user",
+          };
+          req.quant0User = dbUser;
+          req.quant0Claims = claims;
+        } else {
+          userObj = {
+            userId: sub,
+            userName: claims.name || claims.email?.split("@")[0] || sub,
+            role: "user",
+          };
+        }
+      } catch (quant0Err) {
+        return res.status(403).json({ message: "Invalid token!" });
+      }
+    }
+
+    if (!userObj) {
+      return res.status(403).json({ message: "Invalid token!" });
+    }
+
+    req.user = userObj;
+
+    if (role === "allowAll") return next();
+
+    if (role !== userObj.role) {
       req.user = undefined;
-
       return res
         .status(403)
         .json({ message: "You are not authorized to view this page" });
@@ -31,3 +68,4 @@ const isAuth = (role) => (req, res, next) => {
 };
 
 module.exports = isAuth;
+

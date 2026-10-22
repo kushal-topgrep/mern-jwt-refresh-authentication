@@ -18,7 +18,7 @@ const authSchema = new Schema(
     },
     password: {
       type: String,
-      required: true,
+      required: false,
     },
     email: {
       type: String,
@@ -26,6 +26,11 @@ const authSchema = new Schema(
       trim: true,
       email: true,
       required: true,
+    },
+    quant0Sub: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
     role: {
       type: String,

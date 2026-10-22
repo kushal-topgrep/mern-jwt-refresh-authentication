@@ -15,12 +15,14 @@ import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import Divider from "@mui/material/Divider";
 import { IconLockOpen } from "@tabler/icons";
 import { catchError } from "@utils/catchError";
 import useAuth from "hooks/useAuth";
 import usePageTitle from "hooks/usePageTitle";
 import { Controller, useForm } from "react-hook-form";
 import { Link as RouteLink } from "react-router-dom";
+import { redirectToQuant0Login, QUANT0_ENABLED } from "@utils/quant0";
 
 const schema = z.object({
   userName: z
@@ -86,11 +88,41 @@ export default function SignIn() {
           <Avatar sx={{ bgcolor: "primary.main" }}>
             <IconLockOpen />
           </Avatar>
-          <Typography component="h1" variant="h5">
+          <Typography component="h1" variant="h5" sx={{ mt: 1, mb: 2 }}>
             Login
           </Typography>
 
-          <form onSubmit={handleSubmit(onSubmit)}>
+          {/* Quant0 SSO Button */}
+          {QUANT0_ENABLED && (
+            <Box sx={{ width: "100%", mb: 2 }}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={() => redirectToQuant0Login()}
+                sx={{
+                  py: 1.5,
+                  backgroundColor: "#0f172a",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  fontSize: "0.95rem",
+                  textTransform: "none",
+                  "&:hover": {
+                    backgroundColor: "#1e293b",
+                  },
+                }}
+              >
+                Sign In with Quant0
+              </Button>
+
+              <Divider sx={{ my: 2.5 }}>
+                <Typography variant="body2" color="text.secondary">
+                  OR USE LOCAL CREDENTIALS
+                </Typography>
+              </Divider>
+            </Box>
+          )}
+
+          <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
             <Controller
               control={control}
               name="userName"
@@ -158,6 +190,7 @@ export default function SignIn() {
               )}
             </Box>
           </form>
+
           <Link component="p" variant="body2">
             <RouteLink to="/signup">
               Don't have an account? Create account
